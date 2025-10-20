@@ -33,30 +33,41 @@ def get_projects(group_path):
     return projects
 
 
-def get_latest_deployment(project_id):
-    """Fetch latest deployment info for a project."""
+def get_latest_deployments_per_env(project_id):
+    """
+    Fetch ALL deployments (paginated) and return latest deployment per environment.
+    Returns dict[env_name] = deployment_info
+    """
     url = f"{GITLAB_API}/projects/{project_id}/deployments"
-    params = {"per_page": 1, "order_by": "created_at", "sort": "desc"}
-    resp = requests.get(url, headers=HEADERS, params=params)
+    params = {"per_page": 100, "order_by": "created_at", "sort": "desc"}
+    latest_by_env = {}
 
-    if resp.status_code != 200:
-        return None
+    while url:
+        resp = requests.get(url, headers=HEADERS, params=params)
+        resp.raise_for_status()
+        deployments = resp.json()
 
-    data = resp.json()
-    if not data:
-        return None
+        for d in deployments:
+            env = d.get("environment", {}).get("name", "unknown")
+            created_at = d.get("created_at", "")
+            # keep the newest deployment per environment
+            if env not in latest_by_env or created_at > latest_by_env[env]["created_at"]:
+                latest_by_env[env] = {
+                    "CI_PROJECT_NAME": d["project"]["path_with_namespace"],
+                    "CI_PIPELINE_CREATED_AT": created_at,
+                    "CI_ENVIRONMENT_NAME": env,
+                    "CI_COMMIT_REF_NAME": d.get("ref", ""),
+                    "CI_COMMIT_SHORT_SHA": (d.get("sha", "") or "")[:7],
+                    "CI_PIPELINE_URL": d.get("_links", {}).get("pipeline_url", ""),
+                    "CI_JOB_NAME": "deploy",
+                    "GITLAB_USER_LOGIN": d.get("user", {}).get("username", ""),
+                    "created_at": created_at,
+                }
 
-    d = data[0]
-    return {
-        "CI_PROJECT_NAME": d["project"]["path_with_namespace"],
-        "CI_PIPELINE_CREATED_AT": d.get("created_at", ""),
-        "CI_ENVIRONMENT_NAME": d.get("environment", {}).get("name", ""),
-        "CI_COMMIT_REF_NAME": d.get("ref", ""),
-        "CI_COMMIT_SHORT_SHA": (d.get("sha", "") or "")[:7],
-        "CI_PIPELINE_URL": d.get("_links", {}).get("pipeline_url", ""),
-        "CI_JOB_NAME": "deploy",
-        "GITLAB_USER_LOGIN": d.get("user", {}).get("username", ""),
-    }
+        # pagination
+        url = resp.links.get("next", {}).get("url")
+
+    return latest_by_env
 
 
 def main():
@@ -68,11 +79,11 @@ def main():
     for proj in projects:
         pid = proj["id"]
         name = proj["path_with_namespace"]
-        print(f"→ Getting latest deployment for {name} ...")
+        print(f"→ Getting latest deployments for {name} ...")
 
-        dep = get_latest_deployment(pid)
-        if dep:
-            all_data.append(dep)
+        env_deploys = get_latest_deployments_per_env(pid)
+        if env_deploys:
+            all_data.extend(env_deploys.values())
         else:
             print(f"  ⚠️ No deployments found for {name}")
 
@@ -86,5 +97,7 @@ def main():
         f.write(json_output)
         print("\n💾 Saved to deployments.json")
 
+
 if __name__ == "__main__":
     main()
+
