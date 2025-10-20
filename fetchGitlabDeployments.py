@@ -33,7 +33,7 @@ def get_projects(group_path):
     return projects
 
 
-def get_latest_deployments_per_env(project_id):
+def get_latest_deployments_per_env(project_id, project_path):
     """
     Fetch ALL deployments (paginated) and return latest deployment per environment.
     Returns dict[env_name] = deployment_info
@@ -50,10 +50,13 @@ def get_latest_deployments_per_env(project_id):
         for d in deployments:
             env = d.get("environment", {}).get("name", "unknown")
             created_at = d.get("created_at", "")
-            # keep the newest deployment per environment
+            if not env:
+                continue
+
+            # Keep only the most recent deployment per environment
             if env not in latest_by_env or created_at > latest_by_env[env]["created_at"]:
                 latest_by_env[env] = {
-                    "CI_PROJECT_NAME": d["project"]["path_with_namespace"],
+                    "CI_PROJECT_NAME": project_path,
                     "CI_PIPELINE_CREATED_AT": created_at,
                     "CI_ENVIRONMENT_NAME": env,
                     "CI_COMMIT_REF_NAME": d.get("ref", ""),
@@ -64,7 +67,6 @@ def get_latest_deployments_per_env(project_id):
                     "created_at": created_at,
                 }
 
-        # pagination
         url = resp.links.get("next", {}).get("url")
 
     return latest_by_env
@@ -78,14 +80,14 @@ def main():
     all_data = []
     for proj in projects:
         pid = proj["id"]
-        name = proj["path_with_namespace"]
-        print(f"→ Getting latest deployments for {name} ...")
+        path = proj["path_with_namespace"]
+        print(f"→ Getting latest deployments for {path} ...")
 
-        env_deploys = get_latest_deployments_per_env(pid)
+        env_deploys = get_latest_deployments_per_env(pid, path)
         if env_deploys:
             all_data.extend(env_deploys.values())
         else:
-            print(f"  ⚠️ No deployments found for {name}")
+            print(f"  ⚠️ No deployments found for {path}")
 
     # Output JSON
     json_output = json.dumps(all_data, indent=2)
