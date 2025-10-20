@@ -53,6 +53,13 @@ def get_latest_deployments_per_env(project_id, project_path):
             if not env:
                 continue
 
+            # --- Apply environment-specific filtering ---
+            env_lower = env.lower()
+            if env_lower in ("prod", "pprod"):
+                # skip if ref does not start with 'release-'
+                if not ref.startswith("release-"):
+                    continue
+
             # Keep only the most recent deployment per environment
             if env not in latest_by_env or created_at > latest_by_env[env]["created_at"]:
                 latest_by_env[env] = {
